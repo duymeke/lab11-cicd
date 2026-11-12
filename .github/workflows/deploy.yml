@@ -1,0 +1,47 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (e.g. 1.0.1, or 1.0.0 to roll back)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Deploy or roll back
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid image tag: $TAG"
+            exit 1
+          fi
+
+          IMAGE="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+
+          docker pull --platform linux/amd64 "$IMAGE:$TAG"
+
+          docker rm -f lab11-prod 2>/dev/null || true
+
+          docker run --platform linux/amd64 -d \
+            --name lab11-prod \
+            -p 8012:8000 \
+            "$IMAGE:$TAG"
+
+          curl --fail --retry 10 --retry-delay 2 \
+            http://localhost:8012/version
